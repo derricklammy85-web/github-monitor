@@ -15,28 +15,18 @@ jobs:
         # 翻译函数
         translate_to_chinese() {
           local text="$1"
+          if [ -z "$text" ] || [ "$text" == "null" ]; then
+            echo ""
+            return
+          fi
+          
           local encoded_text=$(echo "$text" | jq -sRr @uri)
-          local translated=$(curl -s "https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=zh-CN&dt=t&q=${encoded_text}" | jq -r '.[0][0][0]' 2>/dev/null)
+          local translated=$(curl -s "https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=zh-CN&dt=t&q=${encoded_text}" 2>/dev/null | jq -r '.[0][0][0]' 2>/dev/null)
           
           if [ -n "$translated" ] && [ "$translated" != "null" ]; then
             echo "$translated"
           else
             echo "$text"
-          fi
-        }
-        
-        # 获取 README 摘要
-        get_readme_summary() {
-          local repo="$1"
-          # 获取 README 内容
-          local readme=$(curl -s "https://api.github.com/repos/${repo}/readme" | jq -r '.content' | base64 -d 2>/dev/null | head -c 500)
-          
-          if [ -n "$readme" ] && [ "$readme" != "null" ]; then
-            # 提取前几行有意义的内容
-            local summary=$(echo "$readme" | grep -v "^#" | grep -v "^!" | grep -v "^\[" | grep -v "^$" | head -n 3 | tr '\n' ' ' | head -c 300)
-            echo "$summary"
-          else
-            echo ""
           fi
         }
         
@@ -53,33 +43,40 @@ jobs:
         # 调用 GitHub API 获取热门项目
         TRENDING_DATA=$(curl -s "https://api.github.com/search/repositories?q=stars:>1000&sort=stars&order=desc&per_page=10")
         
-        # 解析并遍历前10个项目
+        # 检查 API 调用是否成功
+        if [ -z "$TRENDING_DATA" ]; then
+          echo "❌ 获取数据失败"
+          exit 1
+        fi
+        
+        # 遍历前10个项目
         for i in {0..9}; do
           echo "正在处理第 $((i+1)) 个项目..."
           
           # 提取项目数据
-          REPO=$(echo $TRENDING_DATA | jq -r ".items[$i].full_name")
-          STARS=$(echo $TRENDING_DATA | jq -r ".items[$i].stargazers_count")
-          FORKS=$(echo $TRENDING_DATA | jq -r ".items[$i].forks_count")
-          WATCHERS=$(echo $TRENDING_DATA | jq -r ".items[$i].watchers_count")
-          ISSUES=$(echo $TRENDING_DATA | jq -r ".items[$i].open_issues_count")
-          LANGUAGE=$(echo $TRENDING_DATA | jq -r ".items[$i].language")
-          URL=$(echo $TRENDING_DATA | jq -r ".items[$i].html_url")
-          DESC=$(echo $TRENDING_DATA | jq -r ".items[$i].description")
-          CREATED=$(echo $TRENDING_DATA | jq -r ".items[$i].created_at" | cut -d'T' -f1)
-          UPDATED=$(echo $TRENDING_DATA | jq -r ".items[$i].updated_at" | cut -d'T' -f1)
-          TOPICS=$(echo $TRENDING_DATA | jq -r ".items[$i].topics[]" 2>/dev/null | head -5 | tr '\n' ', ' | sed 's/,$//')
+          REPO=$(echo "$TRENDING_DATA" | jq -r ".items[$i].full_name" 2>/dev/null)
           
           # 检查是否获取到数据
           if [ "$REPO" == "null" ] || [ -z "$REPO" ]; then
+            echo "没有更多项目"
             break
           fi
           
+          STARS=$(echo "$TRENDING_DATA" | jq -r ".items[$i].stargazers_count" 2>/dev/null)
+          FORKS=$(echo "$TRENDING_DATA" | jq -r ".items[$i].forks_count" 2>/dev/null)
+          WATCHERS=$(echo "$TRENDING_DATA" | jq -r ".items[$i].watchers_count" 2>/dev/null)
+          ISSUES=$(echo "$TRENDING_DATA" | jq -r ".items[$i].open_issues_count" 2>/dev/null)
+          LANGUAGE=$(echo "$TRENDING_DATA" | jq -r ".items[$i].language" 2>/dev/null)
+          URL=$(echo "$TRENDING_DATA" | jq -r ".items[$i].html_url" 2>/dev/null)
+          DESC=$(echo "$TRENDING_DATA" | jq -r ".items[$i].description" 2>/dev/null)
+          CREATED=$(echo "$TRENDING_DATA" | jq -r ".items[$i].created_at" 2>/dev/null | cut -d'T' -f1)
+          UPDATED=$(echo "$TRENDING_DATA" | jq -r ".items[$i].updated_at" 2>/dev/null | cut -d'T' -f1)
+          
           # 格式化数字
-          STARS_FMT=$(printf "%'d" $STARS 2>/dev/null || echo $STARS)
-          FORKS_FMT=$(printf "%'d" $FORKS 2>/dev/null || echo $FORKS)
-          WATCHERS_FMT=$(printf "%'d" $WATCHERS 2>/dev/null || echo $WATCHERS)
-          ISSUES_FMT=$(printf "%'d" $ISSUES 2>/dev/null || echo $ISSUES)
+          STARS_FMT=$(printf "%'d" "$STARS" 2>/dev/null || echo "$STARS")
+          FORKS_FMT=$(printf "%'d" "$FORKS" 2>/dev/null || echo "$FORKS")
+          WATCHERS_FMT=$(printf "%'d" "$WATCHERS" 2>/dev/null || echo "$WATCHERS")
+          ISSUES_FMT=$(printf "%'d" "$ISSUES" 2>/dev/null || echo "$ISSUES")
           
           # 添加排名
           RANK=$((i+1))
@@ -92,21 +89,9 @@ jobs:
           if [ "$DESC" != "null" ] && [ -n "$DESC" ]; then
             echo "正在翻译项目描述..."
             DESC_CN=$(translate_to_chinese "$DESC")
-            MESSAGE="${MESSAGE}📝 <b>项目简介:</b> ${DESC_CN}%0A%0A"
-          fi
-          
-          # 获取并翻译 README 摘要
-          echo "正在获取 README 详细信息..."
-          README_SUMMARY=$(get_readme_summary "$REPO")
-          if [ -n "$README_SUMMARY" ]; then
-            echo "正在翻译 README 摘要..."
-            README_CN=$(translate_to_chinese "$README_SUMMARY")
-            MESSAGE="${MESSAGE}� <b>详细说明:</b> ${README_CN}%0A%0A"
-          fi
-          
-          # 添加主题标签
-          if [ -n "$TOPICS" ] && [ "$TOPICS" != "null" ]; then
-            MESSAGE="${MESSAGE}🏷️ <b>主题标签:</b> ${TOPICS}%0A%0A"
+            if [ -n "$DESC_CN" ]; then
+              MESSAGE="${MESSAGE}📝 <b>项目用途:</b> ${DESC_CN}%0A%0A"
+            fi
           fi
           
           # 添加统计数据
@@ -114,19 +99,23 @@ jobs:
           MESSAGE="${MESSAGE}🍴 <b>分支数:</b> ${FORKS_FMT}%0A"
           MESSAGE="${MESSAGE}👀 <b>关注数:</b> ${WATCHERS_FMT}%0A"
           MESSAGE="${MESSAGE}🐛 <b>问题数:</b> ${ISSUES_FMT}%0A"
-          MESSAGE="${MESSAGE}💻 <b>开发语言:</b> ${LANGUAGE}%0A"
+          
+          if [ "$LANGUAGE" != "null" ] && [ -n "$LANGUAGE" ]; then
+            MESSAGE="${MESSAGE}💻 <b>开发语言:</b> ${LANGUAGE}%0A"
+          fi
+          
           MESSAGE="${MESSAGE}📅 <b>创建时间:</b> ${CREATED}%0A"
           MESSAGE="${MESSAGE}🔄 <b>更新时间:</b> ${UPDATED}%0A"
           MESSAGE="${MESSAGE}%0A━━━━━━━━━━━━━━━━%0A%0A"
           
-          # 添加延迟
-          sleep 2
+          # 添加延迟避免 API 限流
+          sleep 1
         done
         
         # 添加消息尾部
         MESSAGE="${MESSAGE}🤖 <i>自动监测 | 每3小时更新一次</i>%0A"
         MESSAGE="${MESSAGE}💡 <i>数据来源: GitHub API</i>%0A"
-        MESSAGE="${MESSAGE}🌐 <i>内容已自动翻译为中文</i>"
+        MESSAGE="${MESSAGE}🌐 <i>描述已自动翻译为中文</i>"
         
         # 发送到 Telegram
         echo "正在发送消息到 Telegram..."
@@ -139,10 +128,10 @@ jobs:
           -d "disable_web_page_preview=true")
         
         # 检查发送结果
-        if echo "$RESPONSE" | jq -e '.ok' > /dev/null; then
+        if echo "$RESPONSE" | jq -e '.ok' > /dev/null 2>&1; then
           echo "✅ 消息发送成功！"
         else
           echo "❌ 消息发送失败："
-          echo "$RESPONSE" | jq '.'
+          echo "$RESPONSE"
           exit 1
         fi
