@@ -12,11 +12,26 @@ jobs:
     steps:
     - name: Monitor GitHub Projects
       run: |
+        # 翻译函数（使用 Google Translate API）
+        translate_to_chinese() {
+          local text="$1"
+          # URL 编码
+          local encoded_text=$(echo "$text" | jq -sRr @uri)
+          # 调用翻译 API
+          local translated=$(curl -s "https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=zh-CN&dt=t&q=${encoded_text}" | jq -r '.[0][0][0]' 2>/dev/null)
+          
+          if [ -n "$translated" ] && [ "$translated" != "null" ]; then
+            echo "$translated"
+          else
+            echo "$text"
+          fi
+        }
+        
         # 获取当前时间
         TIMESTAMP=$(date '+%Y年%m月%d日 %H:%M:%S')
         
         # 构建消息头部
-        MESSAGE="� <b>GitHub 热门项目 TOP 10</b>%0A"
+        MESSAGE="📊 <b>GitHub 热门项目 TOP 10</b>%0A"
         MESSAGE="${MESSAGE}🕐 更新时间: ${TIMESTAMP}%0A"
         MESSAGE="${MESSAGE}━━━━━━━━━━━━━━━━%0A%0A"
         
@@ -37,7 +52,7 @@ jobs:
           ISSUES=$(echo $TRENDING_DATA | jq -r ".items[$i].open_issues_count")
           LANGUAGE=$(echo $TRENDING_DATA | jq -r ".items[$i].language")
           URL=$(echo $TRENDING_DATA | jq -r ".items[$i].html_url")
-          DESC=$(echo $TRENDING_DATA | jq -r ".items[$i].description" | head -c 200)
+          DESC=$(echo $TRENDING_DATA | jq -r ".items[$i].description")
           CREATED=$(echo $TRENDING_DATA | jq -r ".items[$i].created_at" | cut -d'T' -f1)
           UPDATED=$(echo $TRENDING_DATA | jq -r ".items[$i].updated_at" | cut -d'T' -f1)
           
@@ -59,9 +74,14 @@ jobs:
           MESSAGE="${MESSAGE}<b>🏆 第 ${RANK} 名</b>%0A"
           MESSAGE="${MESSAGE}🔗 <b><a href='${URL}'>${REPO}</a></b>%0A"
           
-          # 添加项目用途描述
+          # 翻译项目描述
           if [ "$DESC" != "null" ] && [ -n "$DESC" ]; then
-            MESSAGE="${MESSAGE}📝 <b>项目用途:</b> ${DESC}%0A%0A"
+            echo "正在翻译项目描述..."
+            # 限制描述长度
+            DESC_SHORT=$(echo "$DESC" | head -c 200)
+            # 翻译成中文
+            DESC_CN=$(translate_to_chinese "$DESC_SHORT")
+            MESSAGE="${MESSAGE}📝 <b>项目用途:</b> ${DESC_CN}%0A%0A"
           else
             MESSAGE="${MESSAGE}📝 <b>项目用途:</b> 暂无描述%0A%0A"
           fi
@@ -75,12 +95,15 @@ jobs:
           MESSAGE="${MESSAGE}📅 <b>创建时间:</b> ${CREATED}%0A"
           MESSAGE="${MESSAGE}🔄 <b>更新时间:</b> ${UPDATED}%0A"
           MESSAGE="${MESSAGE}%0A━━━━━━━━━━━━━━━━%0A%0A"
+          
+          # 避免请求过快
+          sleep 1
         done
         
         # 添加消息尾部
         MESSAGE="${MESSAGE}🤖 <i>自动监测 | 每3小时更新一次</i>%0A"
         MESSAGE="${MESSAGE}💡 <i>数据来源: GitHub API</i>%0A"
-        MESSAGE="${MESSAGE}� <i>按收藏数排序的全球热门项目</i>"
+        MESSAGE="${MESSAGE}🌐 <i>项目描述已自动翻译成中文</i>"
         
         # 发送到 Telegram
         echo "正在发送消息到 Telegram..."
