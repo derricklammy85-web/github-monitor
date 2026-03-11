@@ -2,9 +2,8 @@ name: GitHub Project Monitor
 
 on:
   schedule:
-    # 每3小时运行一次（UTC时间）
     - cron: '0 */3 * * *'
-  workflow_dispatch:  # 允许手动触发
+  workflow_dispatch:
 
 jobs:
   monitor:
@@ -13,94 +12,39 @@ jobs:
     steps:
     - name: Monitor GitHub Projects
       run: |
-        # ========================================
-        # 配置区域：在这里添加你要监控的项目
-        # ========================================
         REPOS=(
           "microsoft/vscode"
           "facebook/react"
           "vuejs/vue"
-          "torvalds/linux"
-          "nodejs/node"
         )
         
-        # ========================================
-        # 获取当前时间
-        # ========================================
         TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
-        
-        # ========================================
-        # 构建消息头部
-        # ========================================
         MESSAGE="📊 <b>GitHub 项目热度报告</b>%0A"
         MESSAGE="${MESSAGE}🕐 ${TIMESTAMP}%0A%0A"
         
-        # ========================================
-        # 遍历每个项目获取数据
-        # ========================================
         for repo in "${REPOS[@]}"; do
-          echo "正在获取 $repo 的数据..."
+          DATA=$(curl -s "https://api.github.com/repos/${repo}")
           
-          # 调用 GitHub API
-          DATA=$(curl -s -H "Accept: application/vnd.github.v3+json" \
-            "https://api.github.com/repos/${repo}")
-          
-          # 检查是否成功获取数据
-          if [ $? -ne 0 ]; then
-            echo "获取 $repo 失败"
-            continue
-          fi
-          
-          # 解析数据
           STARS=$(echo $DATA | jq -r '.stargazers_count')
           FORKS=$(echo $DATA | jq -r '.forks_count')
           WATCHERS=$(echo $DATA | jq -r '.watchers_count')
           ISSUES=$(echo $DATA | jq -r '.open_issues_count')
           LANGUAGE=$(echo $DATA | jq -r '.language')
           URL=$(echo $DATA | jq -r '.html_url')
-          DESC=$(echo $DATA | jq -r '.description' | head -c 80)
           
-          # 格式化数字（添加千位分隔符）
-          STARS_FMT=$(printf "%'d" $STARS 2>/dev/null || echo $STARS)
-          FORKS_FMT=$(printf "%'d" $FORKS 2>/dev/null || echo $FORKS)
-          WATCHERS_FMT=$(printf "%'d" $WATCHERS 2>/dev/null || echo $WATCHERS)
-          ISSUES_FMT=$(printf "%'d" $ISSUES 2>/dev/null || echo $ISSUES)
-          
-          # 添加到消息
           MESSAGE="${MESSAGE}🔗 <a href='${URL}'>${repo}</a>%0A"
-          
-          # 添加描述（如果有）
-          if [ "$DESC" != "null" ] && [ -n "$DESC" ]; then
-            MESSAGE="${MESSAGE}📝 ${DESC}...%0A"
-          fi
-          
-          MESSAGE="${MESSAGE}⭐ Stars: ${STARS_FMT}%0A"
-          MESSAGE="${MESSAGE}🍴 Forks: ${FORKS_FMT}%0A"
-          MESSAGE="${MESSAGE}👀 Watchers: ${WATCHERS_FMT}%0A"
-          MESSAGE="${MESSAGE}🐛 Issues: ${ISSUES_FMT}%0A"
+          MESSAGE="${MESSAGE}⭐ Stars: ${STARS}%0A"
+          MESSAGE="${MESSAGE}🍴 Forks: ${FORKS}%0A"
+          MESSAGE="${MESSAGE}👀 Watchers: ${WATCHERS}%0A"
+          MESSAGE="${MESSAGE}🐛 Issues: ${ISSUES}%0A"
           MESSAGE="${MESSAGE}💻 Language: ${LANGUAGE}%0A%0A"
         done
         
-        # ========================================
-        # 添加消息尾部
-        # ========================================
         MESSAGE="${MESSAGE}━━━━━━━━━━━━━━━━%0A"
         MESSAGE="${MESSAGE}🤖 自动监测 | 每3小时更新"
         
-        # ========================================
-        # 发送到 Telegram
-        # ========================================
-        RESPONSE=$(curl -s -X POST \
+        curl -s -X POST \
           "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
           -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
           -d "text=${MESSAGE}" \
-          -d "parse_mode=HTML" \
-          -d "disable_web_page_preview=false")
-        
-        # 检查发送结果
-        if echo "$RESPONSE" | jq -e '.ok' > /dev/null; then
-          echo "✅ 消息已成功发送到 Telegram"
-        else
-          echo "❌ 发送失败: $RESPONSE"
-          exit 1
-        fi
+          -d "parse_mode=HTML"
